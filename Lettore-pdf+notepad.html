@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="it" class="h-full">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lettore PDF + Blocco Note</title>
+
+    <script src="/_sdk/element_sdk.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+
+    <style>
+      body {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+      }
+
+      /* righe del blocco note */
+      #drawing-canvas {
+        touch-action: none;
+        cursor: crosshair;
+        background-image: repeating-linear-gradient(
+          transparent,
+          transparent 31px,
+          #cbd5e1 31px,
+          #cbd5e1 32px
+        );
+      }
+      #drawing-canvas.disabled {
+        cursor: default;
+      }
+
+      .note-card {
+        transition: all 0.2s ease;
+      }
+      .note-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+      }
+      .delete-btn {
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+      .note-card:hover .delete-btn {
+        opacity: 1;
+      }
+
+      .toast {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-weight: 500;
+        z-index: 1000;
+        animation: slideIn 0.3s ease;
+        color: white;
+      }
+      @keyframes slideIn {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      @view-transition {
+        navigation: auto;
+      }
+    </style>
+  </head>
+
+  <body class="min-h-screen flex flex-col" style="background: linear-gradient(135deg,#667eea 0%,#764ba2 100%);">
+    <!-- HEADER UNICO -->
+    <header class="bg-white bg-opacity-95 shadow-lg">
+      <div class="max-w-6xl mx-auto px-6 py-4 flex flex-col gap-1">
+        <h1 class="text-3xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-indigo-600">
+          Lettore PDF + Blocco Note
+        </h1>
+        <p class="text-sm text-slate-600">
+          Carica un PDF, leggilo e prendi appunti a mano sul blocco note a righe.
+        </p>
+      </div>
+    </header>
+
+    <!-- CONTENUTO CHE SCROLLA -->
+    <main class="flex-1 overflow-y-auto">
+      <div class="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-10">
+        <!-- SEZIONE LETTORE PDF -->
+        <section aria-label="Lettore PDF" class="space-y-4">
+          <!-- Upload -->
+          <div id="upload-section" class="bg-white rounded-2xl shadow-2xl p-6 md:p-8">
+            <div class="flex flex-col items-center justify-center space-y-4 text-center">
+              <svg class="w-16 h-16 md:w-20 md:h-20 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              <h2 class="text-2xl font-semibold text-gray-800">Carica il tuo documento PDF</h2>
+              <p class="text-sm text-slate-600">
+                Seleziona un file dal tuo dispositivo per iniziare la lettura.
+              </p>
+              <input type="file" id="pdf-upload" accept=".pdf" class="hidden">
+              <button
+                id="upload-button"
+                class="px-8 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-lg font-semibold rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200">
+                Carica PDF
+              </button>
+            </div>
+          </div>
+
+          <!-- Viewer -->
+          <div id="viewer-section" class="hidden space-y-4">
+            <!-- Controlli -->
+            <div class="bg-white rounded-2xl shadow-2xl p-4 md:p-6">
+              <div class="flex items-center justify-between flex-wrap gap-4">
+                <div class="flex items-center space-x-2 md:space-x-4">
+                  <button
+                    id="prev-page"
+                    class="px-4 md:px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                    Precedente
+                  </button>
+                  <button
+                    id="next-page"
+                    class="px-4 md:px-6 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                    Successivo
+                  </button>
+                </div>
+
+                <div class="flex items-center space-x-2 md:space-x-3">
+                  <span class="text-gray-700 font-medium">Pagina</span>
+                  <span id="page-num" class="text-xl md:text-2xl font-bold text-purple-600">1</span>
+                  <span class="text-gray-700 font-medium">di</span>
+                  <span id="page-count" class="text-xl md:text-2xl font-bold text-purple-600">1</span>
+                </div>
+
+                <button
+                  id="change-pdf"
+                  class="px-4 md:px-6 py-2 bg-gray-600 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 hover:shadow-lg transform hover:scale-105 transition-all duration-200">
+                  Cambia PDF
+                </button>
+              </div>
+            </div>
+
+            <!-- Pagina PDF -->
+            <div class="bg-white rounded-2xl shadow-2xl p-4 md:p-8">
+              <div id="pdf-container" class="w-full overflow-auto">
+                <div id="loading-indicator" class="flex items-center justify-center py-12">
+                  <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-600"></div>
+                </div>
+                <div id="pdf-content" class="hidden"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SEZIONE BLOCCO NOTE -->
+        <section aria-label="Blocco Note a righe" class="bg-white/80 rounded-2xl shadow-2xl p-4 md:p-6">
+          <div class="max-w-4xl mx-auto">
+            <h2 class="font-bold mb-4 text-center" style="color:#1e293b; font-size:24px;">
+              Blocco Note a Righe
+            </h2>
+
+            <div class="mb-6">
+              <input
+                type="text"
+                id="note-title"
+                placeholder="Titolo della nota..."
+                class="w-full px-4 py-3 rounded-lg border-2 mb-3 font-bold focus:outline-none focus:ring-2"
+                style="color:#1e293b; font-size:19.2px; background-color:#ffffff; border-color:#6366f1;">
+
+              <div class="canvas-container rounded-lg border-2 mb-3"
+                style="background-color:#ffffff; border-color:#6366f1; height:400px; position:relative;">
+                <canvas
+                  id="drawing-canvas"
+                  class="disabled"
+                  style="display:block; width:100%; height:100%; cursor:default;"></canvas>
+              </div>
+
+              <div class="flex gap-2 flex-wrap">
+                <button
+                  id="toggle-draw-btn"
+                  class="flex-1 md:flex-none px-6 py-3 rounded-lg font-medium text-white transition-all hover:opacity-90"
+                  style="background-color:#1e293b; font-size:16px;">
+                  Attiva Disegno
+                </button>
+
+                <button
+                  id="save-btn"
+                  class="flex-1 md:flex-none px-8 py-3 rounded-lg font-medium text-white transition-all hover:opacity-90"
+                  style="background-color:#6366f1; font-size:16px;">
+                  Salva Nota
+                </button>
+
+                <button
+                  id="clear-btn"
+                  class="flex-1 md:flex-none px-8 py-3 rounded-lg font-medium text-white transition-all hover:opacity-90"
+                  style="background-color:#ef4444; font-size:16px;">
+                  Cancella
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-8">
+              <h3 class="font-bold mb-4" style="color:#1e293b; font-size:20px;">
+                Le Mie Note
+              </h3>
+              <div id="notes-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+ <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    const defaultConfig = {
+      app_title: "Lettore PDF",
+      upload_button_text: "Carica PDF",
+      previous_button_text: "Precedente",
+      next_button_text: "Successivo",
+      primary_color: "#667eea",
+      secondary_color: "#764ba2",
+      surface_color: "#ffffff",
+      text_color: "#1f2937",
+      button_color: "#7c3aed",
+      font_family: "system-ui",
+      font_size: 16
+    };
+
+    let pdfDoc = null;
+    let pageNum = 1;
+    let pageRendering = false;
+    let pageNumPending = null;
+
+    async function onConfigChange(config) {
+      const baseSize = config.font_size || defaultConfig.font_size;
+      const customFont = config.font_family || defaultConfig.font_family;
+      const baseFontStack = 'system-ui, -apple-system, sans-serif';
+      const fontFamily = `${customFont}, ${baseFontStack}`;
+      
+      const primaryColor = config.primary_color || defaultConfig.primary_color;
+      const secondaryColor = config.secondary_color || defaultConfig.secondary_color;
+      const surfaceColor = config.surface_color || defaultConfig.surface_color;
+      const textColor = config.text_color || defaultConfig.text_color;
+      const buttonColor = config.button_color || defaultConfig.button_color;
+
+      document.getElementById('app').style.background = `linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%)`;
+      
+      const appTitle = document.getElementById('app-title');
+      appTitle.textContent = config.app_title || defaultConfig.app_title;
+      appTitle.style.fontSize = `${baseSize * 2.5}px`;
+      appTitle.style.fontFamily = fontFamily;
+      appTitle.style.background = `linear-gradient(to right, ${buttonColor}, ${primaryColor})`;
+      
+      const uploadButton = document.getElementById('upload-button');
+      uploadButton.textContent = config.upload_button_text || defaultConfig.upload_button_text;
+      uploadButton.style.fontSize = `${baseSize * 1.125}px`;
+      uploadButton.style.fontFamily = fontFamily;
+      uploadButton.style.background = `linear-gradient(to right, ${buttonColor}, ${primaryColor})`;
+      
+      const prevButton = document.getElementById('prev-page');
+      prevButton.textContent = config.previous_button_text || defaultConfig.previous_button_text;
+      prevButton.style.fontSize = `${baseSize}px`;
+      prevButton.style.fontFamily = fontFamily;
+      prevButton.style.background = `linear-gradient(to right, ${buttonColor}, ${primaryColor})`;
+      
+      const nextButton = document.getElementById('next-page');
+      nextButton.textContent = config.next_button_text || defaultConfig.next_button_text;
+      nextButton.style.fontSize = `${baseSize}px`;
+      nextButton.style.fontFamily = fontFamily;
+      nextButton.style.background = `linear-gradient(to right, ${buttonColor}, ${primaryColor})`;
+      
+      document.querySelectorAll('.bg-white').forEach(el => {
+        el.style.backgroundColor = surfaceColor;
+      });
+      
+      document.querySelectorAll('.text-gray-700, .text-gray-800').forEach(el => {
+        el.style.color = textColor;
+        el.style.fontFamily = fontFamily;
+      });
+      
+      const pageNumEl = document.getElementById('page-num');
+      pageNumEl.style.color = buttonColor;
+      pageNumEl.style.fontSize = `${baseSize * 1.5}px`;
+      pageNumEl.style.fontFamily = fontFamily;
+      
+      const pageCountEl = document.getElementById('page-count');
+      pageCountEl.style.color = buttonColor;
+      pageCountEl.style.fontSize = `${baseSize * 1.5}px`;
+      pageCountEl.style.fontFamily = fontFamily;
+    }
+
+    if (window.elementSdk) {
+      window.elementSdk.init({
+        defaultConfig,
+        onConfigChange,
+        mapToCapabilities: (config) => ({
+          recolorables: [
+            {
+              get: () => config.primary_color || defaultConfig.primary_color,
+              set: (value) => {
+                config.primary_color = value;
+                window.elementSdk.setConfig({ primary_color: value });
+              }
+            },
+            {
+              get: () => config.secondary_color || defaultConfig.secondary_color,
+              set: (value) => {
+                config.secondary_color = value;
+                window.elementSdk.setConfig({ secondary_color: value });
+              }
+            },
+            {
+              get: () => config.surface_color || defaultConfig.surface_color,
+              set: (value) => {
+                config.surface_color = value;
+                window.elementSdk.setConfig({ surface_color: value });
+              }
+            },
+            {
+              get: () => config.text_color || defaultConfig.text_color,
+              set: (value) => {
+                config.text_color = value;
+                window.elementSdk.setConfig({ text_color: value });
+              }
+            },
+            {
+              get: () => config.button_color || defaultConfig.button_color,
+              set: (value) => {
+                config.button_color = value;
+                window.elementSdk.setConfig({ button_color: value });
+              }
+            }
+          ],
+          borderables: [],
+          fontEditable: {
+            get: () => config.font_family || defaultConfig.font_family,
+            set: (value) => {
+              config.font_family = value;
+              window.elementSdk.setConfig({ font_family: value });
+            }
+          },
+          fontSizeable: {
+            get: () => config.font_size || defaultConfig.font_size,
+            set: (value) => {
+              config.font_size = value;
+              window.elementSdk.setConfig({ font_size: value });
+            }
+          }
+        }),
+        mapToEditPanelValues: (config) => new Map([
+          ["app_title", config.app_title || defaultConfig.app_title],
+          ["upload_button_text", config.upload_button_text || defaultConfig.upload_button_text],
+          ["previous_button_text", config.previous_button_text || defaultConfig.previous_button_text],
+          ["next_button_text", config.next_button_text || defaultConfig.next_button_text]
+        ])
+      });
+    }
+
+    async function renderPage(num) {
+      pageRendering = true;
+      const loadingIndicator = document.getElementById('loading-indicator');
+      const pdfContent = document.getElementById('pdf-content');
+      
+      loadingIndicator.classList.remove('hidden');
+      pdfContent.classList.add('hidden');
+
+      try {
+        const page = await pdfDoc.getPage(num);
+        const scale = 1.5;
+        const viewport = page.getViewport({ scale: scale });
+
+        // Crea un canvas temporaneo per ottenere i dati dell'immagine
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        };
+
+        await page.render(renderContext).promise;
+        
+        // Converti il canvas in immagine data URL
+        const imageData = canvas.toDataURL('image/png');
+        
+        // Crea un elemento img per visualizzare il PDF
+        const pageContainer = document.createElement('div');
+        pageContainer.style.margin = '0 auto';
+        pageContainer.style.maxWidth = '100%';
+        pageContainer.style.display = 'flex';
+        pageContainer.style.justifyContent = 'center';
+        
+        const img = document.createElement('img');
+        img.src = imageData;
+        img.alt = `Pagina ${num}`;
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+        img.style.backgroundColor = '#ffffff';
+        
+        pageContainer.appendChild(img);
+        
+        pdfContent.innerHTML = '';
+        pdfContent.appendChild(pageContainer);
+        
+        loadingIndicator.classList.add('hidden');
+        pdfContent.classList.remove('hidden');
+        
+        document.getElementById('page-num').textContent = num;
+        
+        document.getElementById('prev-page').disabled = (num <= 1);
+        document.getElementById('next-page').disabled = (num >= pdfDoc.numPages);
+
+      } catch (error) {
+        console.error('Errore nel rendering della pagina:', error);
+        pdfContent.innerHTML = '<div style="text-align: center; padding: 40px; color: #ef4444;"><p style="font-size: 18px; font-weight: bold;">Errore nel caricamento della pagina</p><p style="margin-top: 10px;">Impossibile visualizzare questa pagina del PDF.</p></div>';
+        loadingIndicator.classList.add('hidden');
+        pdfContent.classList.remove('hidden');
+      }
+
+      pageRendering = false;
+      if (pageNumPending !== null) {
+        renderPage(pageNumPending);
+        pageNumPending = null;
+      }
+    }
+
+    function queueRenderPage(num) {
+      if (pageRendering) {
+        pageNumPending = num;
+      } else {
+        renderPage(num);
+      }
+    }
+
+    function onPrevPage() {
+      if (pageNum <= 1) return;
+      pageNum--;
+      queueRenderPage(pageNum);
+    }
+
+    function onNextPage() {
+      if (pageNum >= pdfDoc.numPages) return;
+      pageNum++;
+      queueRenderPage(pageNum);
+    }
+
+    async function loadPDF(file) {
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      
+      pdfDoc = await loadingTask.promise;
+      document.getElementById('page-count').textContent = pdfDoc.numPages;
+      
+      document.getElementById('upload-section').classList.add('hidden');
+      document.getElementById('viewer-section').classList.remove('hidden');
+      
+      pageNum = 1;
+      renderPage(pageNum);
+    }
+
+    document.getElementById('upload-button').addEventListener('click', () => {
+      document.getElementById('pdf-upload').click();
+    });
+
+    document.getElementById('pdf-upload').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file && file.type === 'application/pdf') {
+        loadPDF(file);
+      }
+    });
+
+    document.getElementById('prev-page').addEventListener('click', onPrevPage);
+    document.getElementById('next-page').addEventListener('click', onNextPage);
+
+    document.getElementById('change-pdf').addEventListener('click', () => {
+      document.getElementById('viewer-section').classList.add('hidden');
+      document.getElementById('upload-section').classList.remove('hidden');
+      pdfDoc = null;
+      pageNum = 1;
+      document.getElementById('pdf-upload').value = '';
+    });
+
+    onConfigChange(defaultConfig);
+    
+    //Canvas
+    
+    let canvas, ctx;
+    let isDrawing = false;
+    let drawingEnabled = false;
+    let lastX = 0;
+    let lastY = 0;
+    let allNotes = [];
+    let currentNoteId = null;
+
+    function loadNotesFromStorage() {
+      const stored = localStorage.getItem('handwritten_notes');
+      if (stored) {
+        try {
+          allNotes = JSON.parse(stored);
+        } catch (e) {
+          allNotes = [];
+        }
+      }
+      renderNotesList();
+    }
+
+    function saveNotesToStorage() {
+      localStorage.setItem('handwritten_notes', JSON.stringify(allNotes));
+    }
+
+    function showToast(message, type = "success") {
+      const existingToast = document.querySelector('.toast');
+      if (existingToast) {
+        existingToast.remove();
+      }
+
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = message;
+      toast.style.backgroundColor = type === "success" ? "#10b981" : "#ef4444";
+      document.body.appendChild(toast);
+
+      setTimeout(() => {
+        toast.remove();
+      }, 3000);
+    }
+
+    function initCanvas() {
+      canvas = document.getElementById('drawing-canvas');
+      ctx = canvas.getContext('2d');
+      
+      const container = canvas.parentElement;
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+      
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      canvas.addEventListener('mousedown', startDrawing);
+      canvas.addEventListener('mousemove', draw);
+      canvas.addEventListener('mouseup', stopDrawing);
+      canvas.addEventListener('mouseout', stopDrawing);
+      
+      canvas.addEventListener('touchstart', handleTouchStart);
+      canvas.addEventListener('touchmove', handleTouchMove);
+      canvas.addEventListener('touchend', stopDrawing);
+    }
+
+    function toggleDrawing() {
+      drawingEnabled = !drawingEnabled;
+      const btn = document.getElementById('toggle-draw-btn');
+      
+      if (drawingEnabled) {
+        btn.textContent = '✓ Disegno Attivo';
+        btn.style.backgroundColor = '#6366f1';
+        canvas.classList.remove('disabled');
+        canvas.style.cursor = 'crosshair';
+      } else {
+        btn.textContent = 'Attiva Disegno';
+        btn.style.backgroundColor = '#1e293b';
+        canvas.classList.add('disabled');
+        canvas.style.cursor = 'default';
+      }
+    }
+    function startDrawing(e) {
+      if (!drawingEnabled) return;
+      isDrawing = true;
+      const rect = canvas.getBoundingClientRect();
+      lastX = e.clientX - rect.left;
+      lastY = e.clientY - rect.top;
+    }
+
+    function draw(e) {
+      if (!isDrawing || !drawingEnabled) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      
+      lastX = x;
+      lastY = y;
+    }
+
+function stopDrawing() {
+      isDrawing = false;
+    }
+
+    function handleTouchStart(e) {
+      if (!drawingEnabled) return;
+      e.preventDefault();
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      isDrawing = true;
+      lastX = touch.clientX - rect.left;
+      lastY = touch.clientY - rect.top;
+    }
+
+    function handleTouchMove(e) {
+      if (!isDrawing || !drawingEnabled) return;
+      e.preventDefault();
+      
+      const touch = e.touches[0];
+      const rect = canvas.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      
+      lastX = x;
+      lastY = y;
+    }
+      function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      currentNoteId = null;
+      document.getElementById('note-title').value = '';
+      drawingEnabled = false;
+      const btn = document.getElementById('toggle-draw-btn');
+      if (btn) {
+        btn.textContent = 'Attiva Disegno';
+        btn.style.backgroundColor = '#1e293b';
+        canvas.classList.add('disabled');
+        canvas.style.cursor = 'default';
+      }
+    }
+
+    function saveNote() {
+      const titleInput = document.getElementById('note-title');
+      const title = titleInput.value.trim();
+
+      if (!title) {
+        showToast("Inserisci un titolo", "error");
+        return;
+      }
+
+      const drawingData = canvas.toDataURL();
+      
+      const noteData = {
+        id: currentNoteId || Date.now().toString(),
+        title: title,
+        drawingData: drawingData,
+        createdAt: new Date().toISOString()
+      };
+
+      if (currentNoteId) {
+        const index = allNotes.findIndex(n => n.id === currentNoteId);
+        if (index !== -1) {
+          allNotes[index] = noteData;
+        }
+      } else {
+        allNotes.unshift(noteData);
+      }
+
+      saveNotesToStorage();
+      renderNotesList();
+      showToast("Nota salvata con successo!");
+      clearCanvas();
+    }
+function loadNote(note) {
+      currentNoteId = note.id;
+      document.getElementById('note-title').value = note.title;
+      
+      const img = new Image();
+      img.onload = function() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+      };
+      img.src = note.drawingData;
+      
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function deleteNote(note) {
+      const noteCard = document.querySelector(`[data-note-id="${note.id}"]`);
+      if (noteCard) {
+        const deleteBtn = noteCard.querySelector('.delete-btn');
+        if (deleteBtn.textContent === "Conferma") {
+          allNotes = allNotes.filter(n => n.id !== note.id);
+          saveNotesToStorage();
+          renderNotesList();
+          showToast("Nota eliminata");
+          if (currentNoteId === note.id) {
+            clearCanvas();
+          }
+        } else {
+          deleteBtn.textContent = "Conferma";
+          deleteBtn.style.opacity = "1";
+          setTimeout(() => {
+            if (deleteBtn.textContent === "Conferma") {
+              deleteBtn.textContent = "Elimina";
+            }
+          }, 3000);
+        }
+      }
+    }
+
+    function renderNotesList() {
+      const notesList = document.getElementById('notes-list');
+      if (!notesList) return;
+
+      notesList.innerHTML = '';
+
+      allNotes.forEach(note => {
+        const card = document.createElement('div');
+        card.className = 'note-card p-4 rounded-lg cursor-pointer relative';
+        card.dataset.noteId = note.id;
+        card.style.backgroundColor = '#ffffff';
+        card.style.border = '2px solid #6366f1';
+        
+        card.innerHTML = `
+          <img src="${note.drawingData}" alt="${note.title}" class="note-thumbnail w-full h-32 object-cover rounded mb-2" style="background-color: white;">
+          <h3 class="note-title-text font-bold mb-1" style="color: #1e293b; font-size: 17.6px;">${note.title}</h3>
+          <p class="note-date text-sm" style="color: #1e293b; opacity: 0.6; font-size: 13.6px;">${new Date(note.createdAt).toLocaleDateString('it-IT')}</p>
+          <button class="delete-btn absolute top-2 right-2 px-3 py-1 rounded text-sm font-medium" style="background-color: #ef4444; color: white;">Elimina</button>
+        `;
+
+        card.addEventListener('click', (e) => {
+          if (!e.target.classList.contains('delete-btn')) {
+            loadNote(note);
+          }
+        });
+
+        card.querySelector('.delete-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteNote(note);
+        });
+
+        notesList.appendChild(card);
+      });
+    }
+
+    document.getElementById('toggle-draw-btn').addEventListener('click', toggleDrawing);
+    document.getElementById('save-btn').addEventListener('click', saveNote);
+    document.getElementById('clear-btn').addEventListener('click', clearCanvas);
+
+    initCanvas();
+    loadNotesFromStorage();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b743b4dc41eed2b',t:'MTc2NzI5MzczNC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
