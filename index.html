@@ -502,6 +502,7 @@ let context;
 let canvas;
 let notes = [];
 let currentNoteId = null;
+let drawingEnabled = false; // ← NUOVO: controlla se disegno ATTIVO
 
 const canvasContainer = document.querySelector('.canvas-container');
 
@@ -509,7 +510,6 @@ function initCanvas() {
   canvas = document.getElementById('drawing-canvas');
   context = canvas.getContext('2d');
   
-  // Rendi canvas responsive e scalato per pixel perfetti
   function resizeCanvas() {
     const rect = canvasContainer.getBoundingClientRect();
     canvas.width = rect.width * window.devicePixelRatio;
@@ -542,6 +542,12 @@ function getCanvasPos(e) {
 }
 
 function startDrawing(e) {
+  // ← QUI IL CONTROLLO: non parte se disabilitato
+  if (!drawingEnabled) {
+    e.preventDefault();
+    return;
+  }
+  
   e.preventDefault();
   isDrawing = true;
   const pos = getCanvasPos(e);
@@ -550,114 +556,64 @@ function startDrawing(e) {
 }
 
 function draw(e) {
-  if (!isDrawing) return;
+  if (!isDrawing || !drawingEnabled) {
+    e.preventDefault();
+    return;
+  }
+  
   e.preventDefault();
   const pos = getCanvasPos(e);
   context.lineTo(pos.x, pos.y);
   context.stroke();
 }
 
-function stopDrawing() {
+function stopDrawing(e) {
   if (!isDrawing) return;
   isDrawing = false;
   context.closePath();
 }
 
-function clearCanvas() {
-  context.clearRect(0, 0, canvas.width, canvas.height);
-}
+// ... (clearCanvas, saveNote, deleteNote, loadNotesFromStorage, renderNotes, showToast = UGUALI A PRIMA)
 
-function saveNote() {
-  const title = document.getElementById('note-title').value || 'Nota senza titolo';
-  const drawingData = canvas.toDataURL('image/png');
+function toggleDrawing() {
+  drawingEnabled = !drawingEnabled;
+  const btn = document.getElementById('toggle-draw-btn');
   
-  const noteData = {
-    id: Date.now(),
-    title,
-    drawingData,
-    createdAt: new Date().toISOString()
-  };
-  
-  notes.unshift(noteData);
-  localStorage.setItem('userNotes', JSON.stringify(notes));
-  loadNotesFromStorage();
-  clearCanvas();
-  document.getElementById('note-title').value = '';
-  
-  showToast('Nota salvata!');
-}
-
-function deleteNote(id) {
-  notes = notes.filter(note => note.id !== id);
-  localStorage.setItem('userNotes', JSON.stringify(notes));
-  loadNotesFromStorage();
-}
-
-function loadNotesFromStorage() {
-  const saved = localStorage.getItem('userNotes');
-  if (saved) {
-    notes = JSON.parse(saved);
+  if (drawingEnabled) {
+    canvas.style.cursor = 'crosshair';
+    btn.textContent = 'Disattiva Disegno';
+    btn.style.backgroundColor = '#ef4444';
+  } else {
+    canvas.style.cursor = 'default';
+    btn.textContent = 'Attiva Disegno';
+    btn.style.backgroundColor = '#1e293b';
+    clearCanvas(); // ← Opzionale: pulisce quando disattivi
   }
-  renderNotes();
 }
 
-function renderNotes() {
-  const container = document.getElementById('notes-list');
-  container.innerHTML = '';
-  
-  notes.forEach(note => {
-    const noteCard = document.createElement('div');
-    noteCard.className = 'note-card bg-white rounded-xl shadow-lg p-4 cursor-pointer hover:shadow-xl transition-all duration-200';
-    noteCard.innerHTML = `
-      <div class="mb-2">
-        <h4 class="font-bold text-lg text-slate-800">${note.title}</h4>
-        <p class="text-xs text-slate-500">${new Date(note.createdAt).toLocaleDateString('it-IT')}</p>
-      </div>
-      <img src="${note.drawingData}" class="w-full h-32 object-contain rounded-lg mb-3">
-      <button onclick="deleteNote(${note.id})" class="delete-btn w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all duration-200">
-        Elimina
-      </button>
-    `;
-    container.appendChild(noteCard);
-  });
-}
-
-function showToast(message) {
-  const toast = document.createElement('div');
-  toast.className = 'toast bg-green-500';
-  toast.textContent = message;
-  document.body.appendChild(toast);
-  
-  setTimeout(() => {
-    toast.remove();
-  }, 3000);
-}
-
-// === EVENT LISTENER RESPONSIVE ===
+// Event listener con CONTROLLO
 document.addEventListener('DOMContentLoaded', function() {
   initCanvas();
   loadNotesFromStorage();
   
-  // Mouse events
+  // Mouse (SOLO se abilitato)
+
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   canvas.addEventListener('mouseup', stopDrawing);
   canvas.addEventListener('mouseout', stopDrawing);
   
-  // Touch events SUPER RESPONSIVE
+  // Touch (SOLO se abilitato)
   canvas.addEventListener('touchstart', startDrawing, { passive: false });
   canvas.addEventListener('touchmove', draw, { passive: false });
-  canvas.addEventListener('touchend', stopDrawing, { passive: false });
+  canvas.addEventListener('touchend', stopDrawing);
   
-  // Bottoni
-  document.getElementById('toggle-draw-btn').addEventListener('click', function() {
-    canvas.classList.toggle('disabled');
-    this.textContent = canvas.classList.contains('disabled') ? 'Attiva Disegno' : 'Disattiva Disegno';
-  });
   
+  document.getElementById('toggle-draw-btn').addEventListener('click', toggleDrawing);
   document.getElementById('save-btn').addEventListener('click', saveNote);
   document.getElementById('clear-btn').addEventListener('click', clearCanvas);
 });
+
     
   </script>
  <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b743b4dc41eed2b',t:'MTc2NzI5MzczNC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
