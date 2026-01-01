@@ -497,123 +497,210 @@
     
     //Canvas
     
+let canvas, ctx;
 let isDrawing = false;
-let context;
-let canvas;
-let notes = [];
+let drawingEnabled = false;
+let lastX = 0, lastY = 0;
+let allNotes = [];
 let currentNoteId = null;
-let drawingEnabled = false; // ← NUOVO: controlla se disegno ATTIVO
 
-const canvasContainer = document.querySelector('.canvas-container');
+// Tutte le funzioni del blocco note (dal tuo file originale)
+function loadNotesFromStorage() {
+  const stored = localStorage.getItem('handwrittennotes');
+  if (stored) {
+    try {
+      allNotes = JSON.parse(stored);
+    } catch (e) {
+      allNotes = [];
+    }
+  }
+  renderNotesList();
+}
+
+function saveNotesToStorage() {
+  localStorage.setItem('handwrittennotes', JSON.stringify(allNotes));
+}
+
+function showToast(message, type = 'success') {
+  const existingToast = document.querySelector('.toast');
+  if (existingToast) existingToast.remove();
+  
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  toast.style.backgroundColor = type === 'success' ? '#10b981' : '#ef4444';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
 
 function initCanvas() {
   canvas = document.getElementById('drawing-canvas');
-  context = canvas.getContext('2d');
+  ctx = canvas.getContext('2d');
+  const container = canvas.parentElement;
   
-  function resizeCanvas() {
-    const rect = canvasContainer.getBoundingClientRect();
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
-    canvas.style.width = rect.width + 'px';
-    canvas.style.height = rect.height + 'px';
-    context.scale(window.devicePixelRatio, window.devicePixelRatio);
-    context.lineCap = 'round';
-    context.lineJoin = 'round';
-    context.lineWidth = 3;
-    context.strokeStyle = '#1e293b';
+  // Resize responsive
+  function resize() {
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
   }
+  resize();
   
-  resizeCanvas();
-  window.addEventListener('resize', resizeCanvas);
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
 }
-
-function getCanvasPos(e) {
-  const rect = canvas.getBoundingClientRect();
-  let x, y;
-  
-  if (e.touches && e.touches[0]) {
-    x = e.touches[0].clientX - rect.left;
-    y = e.touches[0].clientY - rect.top;
-  } else {
-    x = e.clientX - rect.left;
-    y = e.clientY - rect.top;
-  }
-  return { x, y };
-}
-
-function startDrawing(e) {
-  // ← QUI IL CONTROLLO: non parte se disabilitato
-  if (!drawingEnabled) {
-    e.preventDefault();
-    return;
-  }
-  
-  e.preventDefault();
-  isDrawing = true;
-  const pos = getCanvasPos(e);
-  context.beginPath();
-  context.moveTo(pos.x, pos.y);
-}
-
-function draw(e) {
-  if (!isDrawing || !drawingEnabled) {
-    e.preventDefault();
-    return;
-  }
-  
-  e.preventDefault();
-  const pos = getCanvasPos(e);
-  context.lineTo(pos.x, pos.y);
-  context.stroke();
-}
-
-function stopDrawing(e) {
-  if (!isDrawing) return;
-  isDrawing = false;
-  context.closePath();
-}
-
-// ... (clearCanvas, saveNote, deleteNote, loadNotesFromStorage, renderNotes, showToast = UGUALI A PRIMA)
 
 function toggleDrawing() {
   drawingEnabled = !drawingEnabled;
   const btn = document.getElementById('toggle-draw-btn');
   
   if (drawingEnabled) {
-    canvas.style.cursor = 'crosshair';
     btn.textContent = 'Disattiva Disegno';
-    btn.style.backgroundColor = '#ef4444';
+    btn.style.backgroundColor = '#6366f1';
+    canvas.style.cursor = 'crosshair';
+    canvas.classList.remove('disabled');
   } else {
-    canvas.style.cursor = 'default';
     btn.textContent = 'Attiva Disegno';
     btn.style.backgroundColor = '#1e293b';
-    clearCanvas(); // ← Opzionale: pulisce quando disattivi
+    canvas.style.cursor = 'default';
+    canvas.classList.add('disabled');
   }
 }
 
-// Event listener con CONTROLLO
+function startDrawing(e) {
+  if (!drawingEnabled) return;
+  isDrawing = true;
+  const rect = canvas.getBoundingClientRect();
+  lastX = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+  lastY = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+}
+
+function draw(e) {
+  if (!isDrawing || !drawingEnabled) return;
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+  const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+  
+  ctx.beginPath();
+  ctx.moveTo(lastX, lastY);
+  ctx.lineTo(x, y);
+  ctx.stroke();
+  lastX = x;
+  lastY = y;
+}
+
+function stopDrawing() {
+  isDrawing = false;
+}
+
+function clearCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  currentNoteId = null;
+  document.getElementById('note-title').value = '';
+  drawingEnabled = false;
+  toggleDrawing(); // Reset stato
+  showToast('Canvas pulito');
+}
+
+function saveNote() {
+  const titleInput = document.getElementById('note-title');
+  const title = titleInput.value.trim();
+  if (!title) {
+    showToast('Inserisci un titolo', 'error');
+    return;
+  }
+  
+  const drawingData = canvas.toDataURL();
+  const noteData = {
+    id: currentNoteId || Date.now().toString(),
+    title,
+    drawingData,
+    createdAt: new Date().toISOString()
+  };
+  
+  if (currentNoteId) {
+    const index = allNotes.findIndex(n => n.id === currentNoteId);
+    if (index !== -1) allNotes[index] = noteData;
+  } else {
+    allNotes.unshift(noteData);
+  }
+  
+  saveNotesToStorage();
+  renderNotesList();
+  showToast('Nota salvata!');
+  clearCanvas();
+}
+
+function renderNotesList() {
+  const notesList = document.getElementById('notes-list');
+  if (!notesList) return;
+  notesList.innerHTML = '';
+  
+  allNotes.forEach(note => {
+    const card = document.createElement('div');
+    card.className = 'note-card p-4 rounded-lg cursor-pointer relative bg-white border-2 border-indigo-400';
+    card.innerHTML = `
+      <img src="${note.drawingData}" alt="${note.title}" class="note-thumbnail w-full h-32 object-cover rounded mb-2 bg-white">
+      <h3 class="note-title font-bold mb-1 text-slate-800 font-size:17px">${note.title}</h3>
+      <p class="note-date text-sm text-slate-500">${new Date(note.createdAt).toLocaleDateString('it-IT')}</p>
+      <button class="delete-btn absolute top-2 right-2 px-3 py-1 rounded text-sm font-medium bg-red-500 text-white" onclick="deleteNote('${note.id}')">
+        Elimina
+      </button>
+    `;
+    card.addEventListener('click', () => loadNote(note));
+    notesList.appendChild(card);
+  });
+}
+
+function loadNote(note) {
+  currentNoteId = note.id;
+  document.getElementById('note-title').value = note.title;
+  const img = new Image();
+  img.onload = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+  };
+  img.src = note.drawingData;
+  toggleDrawing(); // Attiva disegno per modifica
+}
+
+function deleteNote(id) {
+  allNotes = allNotes.filter(n => n.id !== id);
+  saveNotesToStorage();
+  renderNotesList();
+  showToast('Nota eliminata');
+}
+
+// === EVENT LISTENER ===
 document.addEventListener('DOMContentLoaded', function() {
+  // PDF listeners (tuoi originali)
+  document.getElementById('upload-button').addEventListener('click', () => {
+    document.getElementById('pdf-upload').click();
+  });
+  // ... altri tuoi listener PDF ...
+  
+  // Canvas listeners
   initCanvas();
   loadNotesFromStorage();
   
-  // Mouse (SOLO se abilitato)
-
+  // Mouse
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   canvas.addEventListener('mouseup', stopDrawing);
   canvas.addEventListener('mouseout', stopDrawing);
   
-  // Touch (SOLO se abilitato)
-  canvas.addEventListener('touchstart', startDrawing, { passive: false });
-  canvas.addEventListener('touchmove', draw, { passive: false });
+  // Touch
+  canvas.addEventListener('touchstart', startDrawing, {passive: false});
+  canvas.addEventListener('touchmove', draw, {passive: false});
   canvas.addEventListener('touchend', stopDrawing);
   
-  
+  // Bottoni
   document.getElementById('toggle-draw-btn').addEventListener('click', toggleDrawing);
   document.getElementById('save-btn').addEventListener('click', saveNote);
   document.getElementById('clear-btn').addEventListener('click', clearCanvas);
 });
-
     
   </script>
  <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9b743b4dc41eed2b',t:'MTc2NzI5MzczNC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
